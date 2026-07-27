@@ -14,6 +14,7 @@ lightworks
 localsend
 lua-pam-git
 luajit-lgi
+magika
 msi-ec-dkms-git
 networkmanager-iwd
 nmtui-go
