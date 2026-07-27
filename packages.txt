@@ -34,6 +34,7 @@ rustdesk
 scx-manager
 snapper-rollback
 teamviewer
+ttf-ms-win11-base
 ventoy
 vscodium
 wezterm-git
