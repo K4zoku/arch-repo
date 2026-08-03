@@ -82,6 +82,8 @@ jobs:
           sed -i 's/^PACKAGECARCH=/#PACKAGECARCH=/g' /etc/makepkg.conf
 
       - name: Configure pacman options and custom repository
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tmp=$(mktemp)
@@ -94,12 +96,16 @@ jobs:
           cat "$tmp" > /etc/pacman.conf
           rm -f "$tmp"
 
-          cat <<EOF >> /etc/pacman.conf
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            cat <<EOF >> /etc/pacman.conf
 
-          [nanoka]
-          SigLevel = Optional TrustAll
-          Server = https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG
-          EOF
+            [nanoka]
+            SigLevel = Optional TrustAll
+            Server = https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG
+            EOF
+          else
+            echo "Release $RELEASE_TAG not found yet; skipping [nanoka] repo."
+          fi
           pacman -Sy
 
       - name: Checkout repository
