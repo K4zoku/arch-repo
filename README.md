@@ -19,7 +19,7 @@ Packages are built with generic `x86-64` optimizations in a CachyOS container, s
 Append the following to the bottom of `/etc/pacman.conf`:
 
 ```ini
-[nanoka]
+[k4zoku]
 SigLevel = Optional TrustAll
 Server = https://github.com/K4zoku/arch-repo/releases/download/repository
 ```
@@ -60,7 +60,7 @@ Các gói được build với mức tối ưu generic `x86-64` bên trong conta
 Thêm đoạn sau vào cuối file `/etc/pacman.conf`:
 
 ```ini
-[nanoka]
+[k4zoku]
 SigLevel = Optional TrustAll
 Server = https://github.com/K4zoku/arch-repo/releases/download/repository
 ```

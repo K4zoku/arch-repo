@@ -20,7 +20,7 @@ concurrency:
 
 env:
   RELEASE_TAG: repository
-  REPO_DB_NAME: nanoka
+  REPO_DB_NAME: k4zoku
 
 jobs:
   prepare:
@@ -99,13 +99,13 @@ jobs:
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             {
               echo ""
-              echo "[nanoka]"
+              echo "[k4zoku]"
               echo "SigLevel = Optional TrustAll"
               echo "Server = https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG"
             } >> /etc/pacman.conf
-            echo "Enabled [nanoka] repo."
+            echo "Enabled [k4zoku] repo."
           else
-            echo "Release $RELEASE_TAG not found yet; skipping [nanoka] repo."
+            echo "Release $RELEASE_TAG not found yet; skipping [k4zoku] repo."
           fi
           pacman -Sy
 
