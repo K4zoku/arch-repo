@@ -10,6 +10,7 @@ equicord-installer-bin
 fcitx5-lotus-git
 icu74
 ksuperkey
+lib32-nvidia-utils
 lightworks
 localsend
 lua-pam-git
@@ -18,6 +19,7 @@ magika
 msi-ec-dkms-git
 networkmanager-iwd
 nmtui-go
+nvidia-utils
 obs-pipewire-audio-capture
 onlyoffice
 osu-lazer-bin
