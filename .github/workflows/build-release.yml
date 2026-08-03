@@ -97,12 +97,13 @@ jobs:
           rm -f "$tmp"
 
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            cat <<EOF >> /etc/pacman.conf
-
-            [nanoka]
-            SigLevel = Optional TrustAll
-            Server = https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG
-            EOF
+            {
+              echo ""
+              echo "[nanoka]"
+              echo "SigLevel = Optional TrustAll"
+              echo "Server = https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG"
+            } >> /etc/pacman.conf
+            echo "Enabled [nanoka] repo."
           else
             echo "Release $RELEASE_TAG not found yet; skipping [nanoka] repo."
           fi
