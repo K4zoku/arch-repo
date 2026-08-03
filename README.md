@@ -12,7 +12,7 @@ Add the repository to your `pacman` configuration, then install packages like an
 
 ### 1. Check CPU compatibility
 
-Packages are built with generic `x86-64` optimizations inside an official Arch Linux container, so any `x86-64` CPU can use this repository.
+Packages are built with generic `x86-64` optimizations in a CachyOS container, so any `x86-64` CPU can use this repository.
 
 ### 2. Edit your `pacman.conf`
 
@@ -53,7 +53,7 @@ Chỉ cần thêm repository vào cấu hình `pacman` rồi cài gói như gói
 
 #### 1. Kiểm tra khả năng tương thích CPU
 
-Các gói được build với mức tối ưu generic `x86-64` bên trong container Arch Linux chính thức, nên mọi CPU `x86-64` đều dùng được repository này.
+Các gói được build với mức tối ưu generic `x86-64` bên trong container CachyOS, nên mọi CPU `x86-64` đều dùng được repository này.
 
 #### 2. Chỉnh sửa `pacman.conf`
 
