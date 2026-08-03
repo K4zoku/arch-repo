@@ -96,7 +96,7 @@ jobs:
           cat "$tmp" > /etc/pacman.conf
           rm -f "$tmp"
 
-          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[].name' | grep -qx "${REPO_DB_NAME}.db"; then
             {
               echo ""
               echo "[k4zoku]"
