@@ -10,11 +10,7 @@ Personal Arch Linux binary repository, built and published automatically via Git
 
 Add the repository to your `pacman` configuration, then install packages like any official Arch package.
 
-### 1. Check CPU compatibility
-
-Packages are built with generic `x86-64` optimizations in a CachyOS container, so any `x86-64` CPU can use this repository.
-
-### 2. Edit your `pacman.conf`
+### 1. Edit your `pacman.conf`
 
 Append the following to the bottom of `/etc/pacman.conf`:
 
@@ -24,7 +20,7 @@ SigLevel = Optional TrustAll
 Server = https://github.com/K4zoku/arch-repo/releases/download/repository
 ```
 
-### 3. Sync and install
+### 2. Sync and install
 
 ```bash
 sudo pacman -Sy
@@ -39,7 +35,7 @@ sudo pacman -S <package-name>
 
 | Package | Description |
 | :--- | :--- |
-| [webhid](https://github.com/K4zoku/FF-WebHID) | WebHID implementation for Firefox via a native-messaging bridge and hidraw daemon (`x86_64`, `aarch64`) |
+| [webhid](https://github.com/K4zoku/FF-WebHID) | WebHID implementation for Firefox via a native-messaging bridge and hidraw daemon (`x86_64`) |
 
 ---
 
@@ -51,11 +47,7 @@ Kho gói nhị phân Arch Linux cá nhân, được build và phát hành tự �
 
 Chỉ cần thêm repository vào cấu hình `pacman` rồi cài gói như gói chính thức của Arch.
 
-#### 1. Kiểm tra khả năng tương thích CPU
-
-Các gói được build với mức tối ưu generic `x86-64` bên trong container CachyOS, nên mọi CPU `x86-64` đều dùng được repository này.
-
-#### 2. Chỉnh sửa `pacman.conf`
+#### 1. Chỉnh sửa `pacman.conf`
 
 Thêm đoạn sau vào cuối file `/etc/pacman.conf`:
 
@@ -65,7 +57,7 @@ SigLevel = Optional TrustAll
 Server = https://github.com/K4zoku/arch-repo/releases/download/repository
 ```
 
-#### 3. Đồng bộ và cài đặt
+#### 2. Đồng bộ và cài đặt
 
 ```bash
 sudo pacman -Sy
@@ -80,4 +72,4 @@ sudo pacman -S <tên-gói>
 
 | Gói | Mô tả |
 | :--- | :--- |
-| [webhid](https://github.com/K4zoku/FF-WebHID) | Triển khai WebHID cho Firefox qua native-messaging bridge và hidraw daemon (`x86_64`, `aarch64`) |
+| [webhid](https://github.com/K4zoku/FF-WebHID) | Triển khai WebHID cho Firefox qua native-messaging bridge và hidraw daemon (`x86_64`) |
