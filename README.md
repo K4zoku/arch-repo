@@ -8,24 +8,34 @@ Personal Arch Linux binary repository, built and published automatically via Git
 
 Add the repository to your `pacman` configuration, then install packages like any official Arch package.
 
-### 1. Edit your `pacman.conf`
+### 1. Trust the repository signing key
+
+Packages and the repository database are signed with the key `Kazoku <k4zoku@disr.it>` (fingerprint `787C 5932 BF4C DF5C 36E0 71B9 798F BBB0 5FCD D531`). Import it, verify the fingerprint, then locally sign it:
+
+```bash
+sudo pacman-key --recv-keys 787C5932BF4CDF5C36E071B9798FBBB05FCDD531
+sudo pacman-key --finger 787C5932BF4CDF5C36E071B9798FBBB05FCDD531
+sudo pacman-key --lsign-key 787C5932BF4CDF5C36E071B9798FBBB05FCDD531
+```
+
+### 2. Edit your `pacman.conf`
 
 Append the following to the bottom of `/etc/pacman.conf`:
 
 ```ini
 [k4zoku]
-SigLevel = Optional TrustAll
+SigLevel = Required DatabaseOptional
 Server = https://github.com/K4zoku/arch-repo/releases/download/repository
 ```
 
-### 2. Sync and install
+### 3. Sync and install
 
 ```bash
 sudo pacman -Sy
 sudo pacman -S <package-name>
 ```
 
-**Disclaimer:** `SigLevel = Optional TrustAll` means packages are not GPG-signed. Only use this configuration for repositories you fully control or trust.
+**Note:** until the first fully-signed release is published, use `SigLevel = Optional` for this repository instead of `Required`.
 
 ---
 

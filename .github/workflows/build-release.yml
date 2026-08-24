@@ -65,7 +65,7 @@ jobs:
       - name: Install base dependencies
         run: |
           set -euo pipefail
-          pacman -Syu --noconfirm --needed git subversion mercurial sudo rsync github-cli fakeroot binutils pacman-contrib paru curl awk tar jq
+          pacman -Syu --noconfirm --needed git subversion mercurial sudo rsync github-cli fakeroot binutils pacman-contrib paru curl awk tar jq gnupg
           id builder >/dev/null 2>&1 || useradd -m builder
           grep -q '^builder ALL=(ALL) NOPASSWD: ALL$' /etc/sudoers || echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
@@ -117,10 +117,23 @@ jobs:
       - name: Fix workspace ownership for build user
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
 
+      - name: Import signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${GPG_PRIVATE_KEY:-}" ]]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            echo "::warning::GPG_PRIVATE_KEY secret not set; artifacts will be unsigned"
+          fi
+
       - name: Build, Cache and Fallback Logic
         env:
           GH_TOKEN: ${{ github.token }}
           PKG: ${{ matrix.package }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPGKEY: 787C5932BF4CDF5C36E071B9798FBBB05FCDD531
         run: |
           set -uo pipefail
           mkdir -p output /tmp/repo-files /tmp/repo-db
@@ -221,6 +234,13 @@ jobs:
             fi
           done
 
+          # Sign built packages (detached OpenPGP sigs for pacman)
+          if [[ -n "${GPG_PRIVATE_KEY:-}" ]]; then
+            for f in output/*.pkg.tar.zst; do
+              gpg --batch --yes -u "$GPGKEY" --detach-sign "$f" || exit 1
+            done
+          fi
+
           sudo -u builder rm -rf "$GITHUB_WORKSPACE/$PKG/src" "$GITHUB_WORKSPACE/$PKG/pkg"
 
       - name: Upload Artifact
@@ -238,7 +258,18 @@ jobs:
       image: ghcr.io/archlinux/archlinux:latest
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed github-cli pacman-contrib jq
+        run: pacman -Syu --noconfirm --needed github-cli pacman-contrib jq gnupg
+
+      - name: Import signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${GPG_PRIVATE_KEY:-}" ]]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            echo "::warning::GPG_PRIVATE_KEY secret not set; database will be unsigned"
+          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -249,6 +280,9 @@ jobs:
 
       - name: Generate fresh pacman database & Prepare Release Notes
         id: generate
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPGKEY: 787C5932BF4CDF5C36E071B9798FBBB05FCDD531
         run: |
           set -euo pipefail
           cd output
@@ -275,7 +309,11 @@ jobs:
           fi
 
           echo "Generating clean database from active packages only."
-          repo-add "${REPO_DB_NAME}.db.tar.gz" "${pkgs[@]}"
+          if [[ -n "${GPG_PRIVATE_KEY:-}" ]]; then
+            repo-add --sign "${REPO_DB_NAME}.db.tar.gz" "${pkgs[@]}"
+          else
+            repo-add "${REPO_DB_NAME}.db.tar.gz" "${pkgs[@]}"
+          fi
 
           FORMATTED_BUILT=$(echo "$BUILT" | sed '/^$/d' | sed 's/^/- 🟢 /')
           FORMATTED_SKIPPED=$(echo "$SKIPPED" | sed '/^$/d' | sed 's/^/- 🟡 /')
