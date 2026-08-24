@@ -61,3 +61,29 @@ sudo pacman -S <package-name>
 | [tosu-overlay](https://github.com/K4zoku/tosu-overlay-qt) | Overlay for osu! powered by tosu (`x86_64`) |
 | [tosu-overlay-git](https://github.com/K4zoku/tosu-overlay-qt) | Overlay for osu! powered by tosu (git build) (`x86_64`) |
 | [dearsql](https://github.com/dunkbing/dearsql) | Cross-platform SQL database client (`x86_64`) |
+
+---
+
+## 🔧 Use as an AUR source (build from source)
+
+Every package is also mirrored as a git branch carrying its full AUR history, exactly like the official `archlinux/aur` mirror. This works even when the AUR is unreachable.
+
+Clone a package and build it yourself (requires `base-devel`):
+
+```bash
+git clone --depth 1 --single-branch --branch <package> \
+  https://github.com/K4zoku/arch-repo.git <package>
+cd <package>
+makepkg -si
+```
+
+Always review the `PKGBUILD` before building, as you would with any AUR package.
+
+Example with `webhid`:
+
+```bash
+git clone --depth 1 --single-branch --branch webhid \
+  https://github.com/K4zoku/arch-repo.git webhid
+cd webhid
+makepkg -si
+```
