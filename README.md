@@ -2,8 +2,6 @@
 
 Personal Arch Linux binary repository, built and published automatically via GitHub Actions and GitHub Releases.
 
-[🇻🇳 Xem bản tiếng Việt](#-hướng-dẫn-tiếng-việt)
-
 ---
 
 ## 🚀 How to use this repository
@@ -35,41 +33,10 @@ sudo pacman -S <package-name>
 
 | Package | Description |
 | :--- | :--- |
-| [webhid](https://github.com/K4zoku/FF-WebHID) | WebHID implementation for Firefox via a native-messaging bridge and hidraw daemon (`x86_64`) |
-
----
-
-## 🇻🇳 Hướng dẫn tiếng Việt
-
-Kho gói nhị phân Arch Linux cá nhân, được build và phát hành tự động bằng GitHub Actions và GitHub Releases.
-
-### 🚀 Cách dùng repository này
-
-Chỉ cần thêm repository vào cấu hình `pacman` rồi cài gói như gói chính thức của Arch.
-
-#### 1. Chỉnh sửa `pacman.conf`
-
-Thêm đoạn sau vào cuối file `/etc/pacman.conf`:
-
-```ini
-[k4zoku]
-SigLevel = Optional TrustAll
-Server = https://github.com/K4zoku/arch-repo/releases/download/repository
-```
-
-#### 2. Đồng bộ và cài đặt
-
-```bash
-sudo pacman -Sy
-sudo pacman -S <tên-gói>
-```
-
-**Lưu ý:** `SigLevel = Optional TrustAll` nghĩa là gói không được ký GPG. Chỉ nên dùng cấu hình này cho repository do chính bạn kiểm soát hoặc bạn thực sự tin tưởng.
-
----
-
-### 📦 Danh sách gói
-
-| Gói | Mô tả |
-| :--- | :--- |
-| [webhid](https://github.com/K4zoku/FF-WebHID) | Triển khai WebHID cho Firefox qua native-messaging bridge và hidraw daemon (`x86_64`) |
+| [webhid](https://github.com/K4zoku/FF-WebHID) | WebHID implementation for Firefox via a native-messaging bridge and hidraw daemon (`x86_64`, `aarch64`) |
+| [webhid-git](https://github.com/K4zoku/FF-WebHID) | WebHID implementation for Firefox (git build) (`x86_64`, `aarch64`) |
+| [webhid-addon](https://github.com/K4zoku/FF-WebHID) | WebHID browser extension for Firefox and Zen (`any`) |
+| [webhid-addon-git](https://github.com/K4zoku/FF-WebHID) | WebHID browser extension for Firefox and Zen (git build, unsigned) (`any`) |
+| [tosu-overlay](https://github.com/K4zoku/tosu-overlay-qt) | Overlay for osu! powered by tosu (`x86_64`) |
+| [tosu-overlay-git](https://github.com/K4zoku/tosu-overlay-qt) | Overlay for osu! powered by tosu (git build) (`x86_64`) |
+| [dearsql](https://github.com/dunkbing/dearsql) | Cross-platform SQL database client (`x86_64`) |

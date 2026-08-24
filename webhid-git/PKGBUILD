@@ -1,12 +1,12 @@
 # Maintainer: K4zoku <k4zoku@pm.me>
 #
-# This PKGBUILD builds the WebHID daemon + native-messaging host from a
-# release tag (pkgver pins the tag; bump pkgver per release). Supports both
-# x86_64 and aarch64.
+# This PKGBUILD builds the WebHID daemon + native-messaging host from the
+# latest git commit (git package; version derived via git describe, so no
+# manual bump per release). Supports both x86_64 and aarch64.
 
 _pkgbase=webhid
-pkgname=${_pkgbase}
-pkgver=3.1.0
+pkgname=${_pkgbase}-git
+pkgver=3.1.0.r96.g050c5e5
 pkgrel=1
 pkgdesc='WebHID implementation for Firefox via a native-messaging bridge and hidraw daemon'
 arch=('x86_64' 'aarch64')
@@ -15,10 +15,17 @@ license=('MIT')
 depends=('libudev.so')
 makedepends=('cargo' 'pkgconf' 'git')
 optdepends=('webhid-addon: Firefox browser extension (system-wide install)')
-install=webhid.install
-source=("${_pkgbase}::git+${url}.git#tag=v${pkgver}")
-sha256sums=('fc2478fbfeab443e9bbed82714cc8b69e0cfda63c8fdbe001a4770dd89b8d43c')
+provides=("${_pkgbase}")
+conflicts=("${_pkgbase}")
+install=webhid-git.install
+source=("${_pkgbase}::git+${url}.git")
+sha256sums=('SKIP')
 options=('!lto' '!debug')
+
+pkgver() {
+    cd "${_pkgbase}"
+    git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g'
+}
 
 prepare() {
     cargo fetch \

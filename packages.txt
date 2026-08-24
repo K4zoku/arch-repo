@@ -1,3 +1,9 @@
 #####
-# Local packages
-local:webhid
+# AUR packages
+webhid
+webhid-git
+webhid-addon
+webhid-addon-git
+tosu-overlay
+tosu-overlay-git
+dearsql
