@@ -9,6 +9,7 @@ on:
       - '.github/**'
       - 'README.md'
       - 'packages.txt'
+      - 'k4zoku.asc'
   workflow_dispatch: {}
 
 permissions:
