@@ -1,0 +1,69 @@
+name: Sync Package Branches
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pkg-branches
+  cancel-in-progress: true
+
+jobs:
+  sync-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Mirror AUR package histories into branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TARGET="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          pkgs=( $(sed 's/#.*//' packages.txt | awk '{print $1}' | grep -v '^$') )
+
+          for entry in "${pkgs[@]}"; do
+            if [[ "$entry" == local:* ]]; then
+              echo "skipping local: ${entry#local:} (no AUR git history)"
+              continue
+            fi
+            pkg="$entry"
+            rm -rf "/tmp/pkg-$pkg.git"
+
+            # 1) official AUR (full history)
+            if ! git clone -q --mirror "https://aur.archlinux.org/$pkg.git" "/tmp/pkg-$pkg.git" 2>/dev/null; then
+              # 2) official GitHub mirror (full history of the package branch)
+              if ! git clone -q --bare --single-branch --branch "$pkg" \
+                      "https://github.com/archlinux/aur.git" "/tmp/pkg-$pkg.git" 2>/dev/null; then
+                echo "::warning::could not fetch $pkg (AUR + mirror down); keeping existing branch"
+                continue
+              fi
+              echo "$pkg: cloned from GitHub mirror"
+            fi
+
+            # HEAD = master on AUR, = package branch on the mirror; both map to <pkg>
+            git -C "/tmp/pkg-$pkg.git" push "$TARGET" "HEAD:refs/heads/$pkg" --force
+            git -C "/tmp/pkg-$pkg.git" push "$TARGET" --tags --force || true
+            echo "updated branch $pkg (history mirrored)"
+          done
+
+      - name: Prune branches without a package entry
+        run: |
+          set -euo pipefail
+          keep=( $(sed 's/#.*//' packages.txt | awk '{print $1}' | grep -v '^$' | sed 's/^local://') )
+          for ref in $(git ls-remote --heads origin | awk '{print $2}' | sed 's#refs/heads/##'); do
+            case "$ref" in
+              main|aur-sync) continue ;;
+            esac
+            if ! printf '%s\n' "${keep[@]}" | grep -qx "$ref"; then
+              git push origin --delete "$ref" || true
+              echo "pruned branch $ref"
+            fi
+          done
