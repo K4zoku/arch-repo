@@ -10,6 +10,8 @@ Add the repository to your `pacman` configuration, then install packages like an
 
 ### 1. Trust the repository signing key
 
+**Fast path (no key setup):** skip this whole section and use `SigLevel = Optional` for the repository in step 2. Signatures are verified when present but never required, so it just works.
+
 Packages and the repository database are signed with the key `Kazoku <k4zoku@disr.it>` (fingerprint `787C 5932 BF4C DF5C 36E0 71B9 798F BBB0 5FCD D531`). Import it, verify the fingerprint, then locally sign it. Note that importing alone is not enough: `pacman-key --lsign-key` is what actually grants trust.
 
 **Method A: from a keyserver** (this key is hosted on keys.openpgp.org; specify it explicitly since it does not propagate to other keyservers):
@@ -45,8 +47,6 @@ Server = https://github.com/K4zoku/arch-repo/releases/download/repository
 sudo pacman -Sy
 sudo pacman -S <package-name>
 ```
-
-**Note:** until the first fully-signed release is published, use `SigLevel = Optional` for this repository instead of `Required`.
 
 ---
 
