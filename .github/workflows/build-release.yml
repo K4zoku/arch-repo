@@ -19,8 +19,14 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    container:
+      image: cachyos/cachyos
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_builds: ${{ steps.set-matrix.outputs.has_builds }}
+      has_changes: ${{ steps.set-matrix.outputs.has_changes }}
+      skipped: ${{ steps.set-matrix.outputs.skipped }}
+      removed: ${{ steps.set-matrix.outputs.removed }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -28,10 +34,17 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Read package branches
+      - name: Detect changed packages
         id: set-matrix
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          pacman -Syu --noconfirm --needed git sudo github-cli jq
+          id builder >/dev/null 2>&1 || useradd -m builder
+          grep -q '^builder ALL=(ALL) NOPASSWD: ALL$' /etc/sudoers \
+            || echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
           mapfile -t pkgs < <(
             sed 's/#.*//' packages.txt \
               | awk '{print $1}' \
@@ -39,12 +52,103 @@ jobs:
               | grep -v '^$'
           )
 
-          MATRIX_JSON=$(printf '%s\n' "${pkgs[@]}" | jq -R . | jq -s -c .)
-          echo "Found package branches: $MATRIX_JSON"
-          echo "matrix=$MATRIX_JSON" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/repo-files /tmp/repo-db
+          if gh release download "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
+              --dir /tmp/repo-db \
+              --pattern "${REPO_DB_NAME}.files.tar.gz" 2>/dev/null; then
+            tar -xzf "/tmp/repo-db/${REPO_DB_NAME}.files.tar.gz" \
+              -C /tmp/repo-files
+          fi
+
+          changed=()
+          skipped=()
+          for pkg in "${pkgs[@]}"; do
+            echo "::group::Checking $pkg"
+            git fetch --depth=1 origin \
+              "refs/heads/$pkg:refs/remotes/origin/$pkg"
+            git worktree add --detach "$pkg" "refs/remotes/origin/$pkg"
+            chown -R builder:builder "$pkg"
+
+            if grep -q 'pkgver()' "$pkg/PKGBUILD"; then
+              sudo -u builder bash -lc \
+                "cd '$GITHUB_WORKSPACE/$pkg' && makepkg -od --noprepare --skipinteg" \
+                >/dev/null 2>&1 || true
+            fi
+
+            expected_pkgs=$(sudo -u builder bash -lc \
+              "cd '$GITHUB_WORKSPACE/$pkg' && makepkg --packagelist 2>/dev/null" \
+              || true)
+            expected_pkgs="${expected_pkgs//:/.}"
+
+            needs_build=false
+            if [[ -z "$expected_pkgs" ]]; then
+              needs_build=true
+            else
+              for pkg_path in $expected_pkgs; do
+                pkg_basename=$(basename "$pkg_path")
+                if ! grep -q -x -- "$pkg_basename" /tmp/repo-files/*/desc 2>/dev/null; then
+                  needs_build=true
+                  break
+                fi
+              done
+            fi
+
+            if [[ "$needs_build" == "true" ]]; then
+              changed+=("$pkg")
+              echo "$pkg requires a build"
+            else
+              skipped+=("$pkg")
+              echo "$pkg is up to date"
+            fi
+            git worktree remove --force "$pkg"
+            echo "::endgroup::"
+          done
+
+          declare -A removed_seen=()
+          for desc_file in /tmp/repo-files/*/desc; do
+            [[ -f "$desc_file" ]] || continue
+            base_pkg=$(awk '/^%BASE%/{getline; print; exit}' "$desc_file")
+            pkg_name=$(awk '/^%NAME%/{getline; print; exit}' "$desc_file")
+            check_name="${base_pkg:-$pkg_name}"
+            active=false
+            for pkg in "${pkgs[@]}"; do
+              if [[ "$pkg" == "$check_name" ]]; then
+                active=true
+                break
+              fi
+            done
+            [[ "$active" == "true" ]] || removed_seen["$check_name"]=1
+          done
+          removed=("${!removed_seen[@]}")
+
+          array_json() {
+            if (($# == 0)); then
+              printf '[]'
+            else
+              printf '%s\n' "$@" | jq -R . | jq -s -c .
+            fi
+          }
+
+          matrix_json=$(array_json "${changed[@]}")
+          skipped_json=$(array_json "${skipped[@]}")
+          removed_json=$(array_json "${removed[@]}")
+          has_builds=false
+          has_changes=false
+          ((${#changed[@]} > 0)) && has_builds=true
+          ((${#changed[@]} > 0 || ${#removed[@]} > 0)) && has_changes=true
+
+          echo "Changed packages: $matrix_json"
+          echo "Skipped packages: $skipped_json"
+          echo "Removed packages: $removed_json"
+          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
+          echo "has_builds=$has_builds" >> "$GITHUB_OUTPUT"
+          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
+          echo "skipped=$skipped_json" >> "$GITHUB_OUTPUT"
+          echo "removed=$removed_json" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: prepare
+    if: needs.prepare.outputs.has_builds == 'true'
     runs-on: ubuntu-latest
     container:
       image: cachyos/cachyos
@@ -106,11 +210,23 @@ jobs:
           pacman -Sy
 
       - name: Checkout package branch
+        id: package
         uses: actions/checkout@v7
         with:
           ref: ${{ matrix.package }}
           path: ${{ matrix.package }}
           fetch-depth: 1
+
+      - name: Restore package build directories
+        id: package-build-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ matrix.package }}/src
+            ${{ matrix.package }}/pkg
+          key: arch-package-build-v1-${{ matrix.package }}-${{ steps.package.outputs.commit }}
+          restore-keys: |
+            arch-package-build-v1-${{ matrix.package }}-
       - name: Fix workspace ownership for build user
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
 
@@ -125,7 +241,8 @@ jobs:
             echo "::warning::GPG_PRIVATE_KEY secret not set; artifacts will be unsigned"
           fi
 
-      - name: Build, Cache and Fallback Logic
+      - name: Build and Fallback Logic
+        id: build
         env:
           GH_TOKEN: ${{ github.token }}
           PKG: ${{ matrix.package }}
@@ -135,91 +252,65 @@ jobs:
           set -uo pipefail
           mkdir -p output /tmp/repo-files /tmp/repo-db
 
-          echo "Fetching database metadata..."
-          if gh release download "$RELEASE_TAG" --repo "${{ github.repository }}" --dir /tmp/repo-db --pattern "${REPO_DB_NAME}.files.tar.gz" 2>/dev/null; then
-            tar -xzf "/tmp/repo-db/${REPO_DB_NAME}.files.tar.gz" -C /tmp/repo-files 2>/dev/null || true
+          echo "Fetching database metadata for fallback..."
+          if gh release download "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
+              --dir /tmp/repo-db \
+              --pattern "${REPO_DB_NAME}.files.tar.gz" 2>/dev/null; then
+            tar -xzf "/tmp/repo-db/${REPO_DB_NAME}.files.tar.gz" \
+              -C /tmp/repo-files 2>/dev/null || true
           fi
 
-          echo "Checking status for $PKG"
-          if grep -q 'pkgver()' "$PKG/PKGBUILD"; then
-            sudo -u builder bash -lc "cd '$GITHUB_WORKSPACE/$PKG' && makepkg -od --noprepare --skipinteg" >/dev/null 2>&1 || true
+          echo "Building $PKG with paru"
+          ASSUME_PKGS=$(sudo -u builder bash -lc \
+            "cd '$GITHUB_WORKSPACE/$PKG' && source PKGBUILD && echo \${pkgname[@]}")
+          ASSUME_ARGS=""
+          for subpkg in $ASSUME_PKGS; do
+            ASSUME_ARGS="$ASSUME_ARGS --assume-installed $subpkg"
+          done
+          PARU_FLAGS="--noconfirm --skipreview --useask --removemake --nocheck -B$ASSUME_ARGS"
+          if [[ "$PKG" == "pacman" ]]; then
+            echo "Package is pacman: adding --skipinteg to makepkg arguments"
+            PARU_FLAGS="$PARU_FLAGS --mflags --skipinteg"
           fi
+          sed -i 's/_BUILD_DOCS=.*/_BUILD_DOCS=0/' "$PKG/PKGBUILD"
+          sudo -u builder bash -lc \
+            "cd '$GITHUB_WORKSPACE/$PKG' && paru $PARU_FLAGS '$GITHUB_WORKSPACE/$PKG'" \
+            || true
 
-          EXPECTED_PKGS=$(sudo -u builder bash -lc "cd '$GITHUB_WORKSPACE/$PKG' && makepkg --packagelist 2>/dev/null" || true)
-          EXPECTED_PKGS="${EXPECTED_PKGS//:/.}"
-
-          NEEDS_BUILD=false
-          if [[ -z "$EXPECTED_PKGS" ]]; then
-            NEEDS_BUILD=true
+          if ls "$PKG"/*.pkg.tar.zst >/dev/null 2>&1; then
+            mv "$PKG"/*.pkg.tar.zst output/
+            echo "Build OK: $PKG"
+            echo "$PKG" > output/status-built-$PKG.txt
           else
-            for pkg_path in $EXPECTED_PKGS; do
-              pkg_basename=$(basename "$pkg_path")
-              if ! grep -q -x "$pkg_basename" /tmp/repo-files/*/desc 2>/dev/null; then
-                NEEDS_BUILD=true
-                break
-              fi
-            done
-          fi
-
-          if [[ "$NEEDS_BUILD" == "false" ]]; then
-            echo "Package $PKG is up to date. Fetching specific cache from release."
-            for pkg_path in $EXPECTED_PKGS; do
-              pkg_basename=$(basename "$pkg_path")
-              if ! gh release download "$RELEASE_TAG" --repo "${{ github.repository }}" --dir output --pattern "$pkg_basename" 2>/dev/null; then
-                echo "Failed to fetch $pkg_basename cache. Forcing rebuild."
-                NEEDS_BUILD=true
-                break
-              fi
-            done
-          fi
-
-          if [[ "$NEEDS_BUILD" == "false" ]]; then
-            echo "$PKG" > output/status-skipped-$PKG.txt
-          else
-            echo "Building $PKG with paru"
-            ASSUME_PKGS=$(sudo -u builder bash -lc "cd '$GITHUB_WORKSPACE/$PKG' && source PKGBUILD && echo \${pkgname[@]}")
-            ASSUME_ARGS=""
-            for subpkg in $ASSUME_PKGS; do
-              ASSUME_ARGS="$ASSUME_ARGS --assume-installed $subpkg"
-            done
-            PARU_FLAGS="--noconfirm --skipreview --useask --removemake --nocheck -B$ASSUME_ARGS"
-            if [[ "$PKG" == "pacman" ]]; then
-              echo "Package is pacman: adding --skipinteg to makepkg arguments"
-              PARU_FLAGS="$PARU_FLAGS --mflags --skipinteg"
-            fi
-            sed -i 's/_BUILD_DOCS=.*/_BUILD_DOCS=0/' "$PKG/PKGBUILD"
-            sudo -u builder bash -lc "cd '$GITHUB_WORKSPACE/$PKG' && paru $PARU_FLAGS '$GITHUB_WORKSPACE/$PKG'" || true
-            if ls "$PKG"/*.pkg.tar.zst >/dev/null 2>&1; then
-              mv "$PKG"/*.pkg.tar.zst output/
-              echo "Build OK: $PKG"
-              echo "$PKG" > output/status-built-$PKG.txt
-            else
-              echo "Build failed for $PKG"
-              echo "Triggering fallback mechanism for $PKG..."
-              FALLBACK_SUCCESS=false
-              if [[ -d /tmp/repo-files ]]; then
-                for desc_file in /tmp/repo-files/*/desc; do
-                  [[ -f "$desc_file" ]] || continue
-                  base_pkg=$(awk '/^%BASE%/{getline; print; exit}' "$desc_file")
-                  pkg_name=$(awk '/^%NAME%/{getline; print; exit}' "$desc_file")
-                  check_name="${base_pkg:-$pkg_name}"
-                  if [[ "$check_name" == "$PKG" ]]; then
-                    file_name=$(awk '/^%FILENAME%/{getline; print; exit}' "$desc_file")
-                    if [[ -n "$file_name" ]]; then
-                      echo "Restoring $file_name from previous release"
-                      if gh release download "$RELEASE_TAG" --repo "${{ github.repository }}" --dir output --pattern "$file_name" 2>/dev/null; then
-                        FALLBACK_SUCCESS=true
-                        echo "$PKG" > output/status-failed-$PKG.txt
-                      fi
+            echo "Build failed for $PKG"
+            echo "Triggering fallback mechanism for $PKG..."
+            FALLBACK_SUCCESS=false
+            if [[ -d /tmp/repo-files ]]; then
+              for desc_file in /tmp/repo-files/*/desc; do
+                [[ -f "$desc_file" ]] || continue
+                base_pkg=$(awk '/^%BASE%/{getline; print; exit}' "$desc_file")
+                pkg_name=$(awk '/^%NAME%/{getline; print; exit}' "$desc_file")
+                check_name="${base_pkg:-$pkg_name}"
+                if [[ "$check_name" == "$PKG" ]]; then
+                  file_name=$(awk '/^%FILENAME%/{getline; print; exit}' "$desc_file")
+                  if [[ -n "$file_name" ]]; then
+                    echo "Restoring $file_name from previous release"
+                    if gh release download "$RELEASE_TAG" \
+                        --repo "${{ github.repository }}" \
+                        --dir output \
+                        --pattern "$file_name" 2>/dev/null; then
+                      FALLBACK_SUCCESS=true
+                      echo "$PKG" > output/status-failed-$PKG.txt
                     fi
                   fi
-                done
-              fi
-              if [[ "$FALLBACK_SUCCESS" == "false" ]]; then
-                echo "Fallback failed for $PKG: no previous files found. Gracefully exiting to ignore package."
-                echo "$PKG" > output/status-failed-$PKG.txt
-                exit 0
-              fi
+                fi
+              done
+            fi
+            if [[ "$FALLBACK_SUCCESS" == "false" ]]; then
+              echo "Fallback failed for $PKG: no previous files found. Gracefully exiting to ignore package."
+              echo "$PKG" > output/status-failed-$PKG.txt
+              exit 0
             fi
           fi
 
@@ -238,7 +329,18 @@ jobs:
             done
           fi
 
-          sudo -u builder rm -rf "$GITHUB_WORKSPACE/$PKG/src" "$GITHUB_WORKSPACE/$PKG/pkg"
+      - name: Save package build directories
+        if: always() && steps.package-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ matrix.package }}/src
+            ${{ matrix.package }}/pkg
+          key: arch-package-build-v1-${{ matrix.package }}-${{ steps.package.outputs.commit }}
+
+      - name: Clean package build directories
+        if: always()
+        run: sudo -u builder rm -rf "$GITHUB_WORKSPACE/${{ matrix.package }}/src" "$GITHUB_WORKSPACE/${{ matrix.package }}/pkg"
 
       - name: Upload package files
         uses: actions/upload-artifact@v7
@@ -265,7 +367,11 @@ jobs:
           retention-days: 1
 
   publish:
-    needs: [prepare, build]
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.prepare.outputs.has_changes == 'true' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/archlinux/archlinux:latest
@@ -284,7 +390,37 @@ jobs:
             echo "::warning::GPG_PRIVATE_KEY secret not set; database will be unsigned"
           fi
 
+      - name: Restore unchanged package artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGED_PACKAGES: ${{ needs.prepare.outputs.matrix }}
+          REMOVED_PACKAGES: ${{ needs.prepare.outputs.removed }}
+        run: |
+          set -euo pipefail
+          mkdir -p output /tmp/previous-packages
+          REPO="${{ github.repository }}"
+          TAG="${{ env.RELEASE_TAG }}"
+
+          gh release download "$TAG" --repo "$REPO" \
+            --dir /tmp/previous-packages \
+            --pattern '*.pkg.tar.zst' 2>/dev/null || true
+          gh release download "$TAG" --repo "$REPO" \
+            --dir /tmp/previous-packages \
+            --pattern '*.pkg.tar.zst.sig' 2>/dev/null || true
+
+          for pkg in \
+              $(jq -r '.[]' <<< "$CHANGED_PACKAGES") \
+              $(jq -r '.[]' <<< "$REMOVED_PACKAGES"); do
+            rm -f "/tmp/previous-packages/${pkg}-"*.pkg.tar.zst
+            rm -f "/tmp/previous-packages/${pkg}-"*.pkg.tar.zst.sig
+          done
+
+          cp -n /tmp/previous-packages/*.pkg.tar.zst output/ 2>/dev/null || true
+          cp -n /tmp/previous-packages/*.pkg.tar.zst.sig output/ 2>/dev/null || true
+
+
       - name: Download all artifacts
+        if: needs.build.result == 'success'
         uses: actions/download-artifact@v8
         with:
           path: output
@@ -295,6 +431,8 @@ jobs:
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPGKEY: 787C5932BF4CDF5C36E071B9798FBBB05FCDD531
+          PREPARE_SKIPPED: ${{ needs.prepare.outputs.skipped }}
+          PREPARE_REMOVED: ${{ needs.prepare.outputs.removed }}
         run: |
           set -euo pipefail
           cd output
@@ -310,11 +448,12 @@ jobs:
           echo "has_packages=true" >> "$GITHUB_OUTPUT"
 
           BUILT=$(cat status-built-*.txt 2>/dev/null || true)
-          SKIPPED=$(cat status-skipped-*.txt 2>/dev/null || true)
+          SKIPPED=$(jq -r '.[]' <<< "$PREPARE_SKIPPED")
+          REMOVED=$(jq -r '.[]' <<< "$PREPARE_REMOVED")
           FAILED=$(cat status-failed-*.txt 2>/dev/null || true)
           rm -f status-*.txt
 
-          if [[ -z "$BUILT" ]]; then
+          if [[ -z "$BUILT" && -z "$REMOVED" ]]; then
             echo "has_new_changes=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_new_changes=true" >> "$GITHUB_OUTPUT"
@@ -329,10 +468,12 @@ jobs:
 
           FORMATTED_BUILT=$(echo "$BUILT" | sed '/^$/d' | sed 's/^/- 🟢 /')
           FORMATTED_SKIPPED=$(echo "$SKIPPED" | sed '/^$/d' | sed 's/^/- 🟡 /')
+          FORMATTED_REMOVED=$(echo "$REMOVED" | sed '/^$/d' | sed 's/^/- Removed /')
           FORMATTED_FAILED=$(echo "$FAILED" | sed '/^$/d' | sed 's/^/- 🔴 /' | sed 's/$/ (Restored via Fallback)/')
 
           [[ -z "$FORMATTED_BUILT" ]] && FORMATTED_BUILT="- None"
           [[ -z "$FORMATTED_SKIPPED" ]] && FORMATTED_SKIPPED="- None"
+          [[ -z "$FORMATTED_REMOVED" ]] && FORMATTED_REMOVED="- None"
           [[ -z "$FORMATTED_FAILED" ]] && FORMATTED_FAILED="- None"
 
           {
@@ -341,6 +482,9 @@ jobs:
             echo "EOF"
             echo "SKIPPED_LOG<<EOF"
             echo "$FORMATTED_SKIPPED"
+            echo "EOF"
+            echo "REMOVED_LOG<<EOF"
+            echo "$FORMATTED_REMOVED"
             echo "EOF"
             echo "FAILED_LOG<<EOF"
             echo "$FORMATTED_FAILED"
@@ -383,6 +527,9 @@ jobs:
 
           #### 🟡 Cached / Skipped Packages
           ${{ env.SKIPPED_LOG }}
+
+          #### Removed Packages
+          ${{ env.REMOVED_LOG }}
 
           #### 🔴 Failed Packages
           ${{ env.FAILED_LOG }}
