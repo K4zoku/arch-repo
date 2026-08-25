@@ -161,6 +161,7 @@ jobs:
           echo "removed=$removed_json" >> "$GITHUB_OUTPUT"
 
   build:
+    needs: prepare
     runs-on: ubuntu-latest
     container:
       image: cachyos/cachyos
@@ -390,6 +391,7 @@ jobs:
           retention-days: 1
 
   publish:
+    needs: [prepare, build]
     if: >-
       always() &&
       needs.prepare.result == 'success' &&
