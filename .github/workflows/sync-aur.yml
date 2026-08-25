@@ -95,6 +95,51 @@ jobs:
           echo "- Failed: ${FAILED[*]:-none}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Removed: ${REMOVED[*]:-none}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Sync package branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TARGET="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+            entry="$(echo "$raw_line" | sed 's/#.*//' | xargs)"
+            [[ -z "$entry" ]] && continue
+            [[ "$entry" == local:* ]] && {
+              echo "Skipping local package branch: ${entry#local:}"
+              continue
+            }
+
+            pkg="$entry"
+            rm -rf "/tmp/pkg-$pkg.git"
+            if ! git clone -q --mirror "https://aur.archlinux.org/$pkg.git" \
+                    "/tmp/pkg-$pkg.git" 2>/dev/null; then
+              if ! git clone -q --bare --single-branch --branch "$pkg" \
+                      "https://github.com/archlinux/aur.git" "/tmp/pkg-$pkg.git" 2>/dev/null; then
+                echo "::warning::could not fetch $pkg (AUR + mirror down); keeping existing branch"
+                continue
+              fi
+              echo "$pkg: cloned from GitHub mirror"
+            fi
+
+            git -C "/tmp/pkg-$pkg.git" push "$TARGET" "HEAD:refs/heads/$pkg" --force
+            git -C "/tmp/pkg-$pkg.git" push "$TARGET" --tags --force || true
+            echo "Updated package branch $pkg"
+          done < packages.txt
+
+          mapfile -t KEEP < <(
+            sed 's/#.*//' packages.txt | awk '{print $1}' | sed 's/^local://' | grep -v '^$'
+          )
+          while read -r ref; do
+            case "$ref" in
+              main|aur-sync) continue ;;
+            esac
+            if ! printf '%s\n' "${KEEP[@]}" | grep -q -x "$ref"; then
+              git push origin --delete "$ref" || true
+              echo "Pruned obsolete package branch $ref"
+            fi
+          done < <(git ls-remote --heads origin | awk '{print $2}' | sed 's#refs/heads/##')
+
       - name: Create or update aggregated pull request
         uses: peter-evans/create-pull-request@v8
         with:

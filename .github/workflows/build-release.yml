@@ -249,11 +249,27 @@ jobs:
 
           sudo -u builder rm -rf "$GITHUB_WORKSPACE/$PKG/src" "$GITHUB_WORKSPACE/$PKG/pkg"
 
-      - name: Upload Artifact
+      - name: Upload package files
         uses: actions/upload-artifact@v7
         with:
-          name: pkg-${{ matrix.package }}
-          path: output/*
+          path: output/*.pkg.tar.zst
+          archive: false
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Upload package signatures
+        uses: actions/upload-artifact@v7
+        with:
+          path: output/*.pkg.tar.zst.sig
+          archive: false
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Upload build status
+        uses: actions/upload-artifact@v7
+        with:
+          path: output/status-*.txt
+          archive: false
           if-no-files-found: ignore
           retention-days: 1
 
@@ -281,7 +297,6 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: output
-          pattern: pkg-*
           merge-multiple: true
 
       - name: Generate fresh pacman database & Prepare Release Notes
