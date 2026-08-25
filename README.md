@@ -61,6 +61,7 @@ sudo pacman -S <package-name>
 | [tosu-overlay](https://github.com/K4zoku/tosu-overlay-qt) | Overlay for osu! powered by tosu (`x86_64`) |
 | [tosu-overlay-git](https://github.com/K4zoku/tosu-overlay-qt) | Overlay for osu! powered by tosu (git build) (`x86_64`) |
 | [dearsql](https://github.com/dunkbing/dearsql) | Cross-platform SQL database client (`x86_64`) |
+| [dearsql-git](https://github.com/dunkbing/dearsql) | Cross-platform SQL database client (git build) (`x86_64`) |
 
 ---
 

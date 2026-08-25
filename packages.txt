@@ -7,3 +7,4 @@ webhid-addon-git
 tosu-overlay
 tosu-overlay-git
 dearsql
+dearsql-git
