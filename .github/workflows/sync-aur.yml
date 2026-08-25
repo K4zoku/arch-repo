@@ -9,11 +9,11 @@ on:
       - 'packages.txt'
 
 permissions:
+  actions: write
   contents: write
-  pull-requests: write
 
 concurrency:
-  group: aur-sync
+  group: package-sync
   cancel-in-progress: false
 
 jobs:
@@ -24,7 +24,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
-
       - name: Validate packages.txt exists
         run: |
           if [[ ! -f packages.txt ]]; then
@@ -32,32 +31,18 @@ jobs:
             exit 1
           fi
 
-      - name: Sync packages, branches and prune removed
-        id: sync
+      - name: Sync package branches
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/aur-clone
           TARGET="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          mkdir -p /tmp/aur-clone
           SYNCED=()
           FAILED=()
           REMOVED=()
-
-          mapfile -t VALID_PKGS < <(sed 's/#.*//' packages.txt | awk '{print $1}' | grep -v '^$' | sed 's/^local://')
-
-          for dir in */ ; do
-            [[ -e "$dir" ]] || continue
-            dir="${dir%/}"
-            case "$dir" in
-              .github) continue ;;
-            esac
-            if ! printf '%s\n' "${VALID_PKGS[@]}" | grep -q -x "$dir"; then
-              echo "Removing obsolete package directory: $dir"
-              rm -rf "$dir"
-              REMOVED+=("$dir")
-            fi
-          done
+          CHANGED=false
+          UNCHANGED=()
 
           while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
             entry="$(echo "$raw_line" | sed 's/#.*//' | xargs)"
@@ -68,30 +53,53 @@ jobs:
             }
 
             pkg="$entry"
-            mirror="/tmp/aur-clone/$pkg.git"
-            rm -rf "$mirror"
-
-            echo "Cloning $pkg from AUR..."
-            if ! git clone -q --mirror "https://aur.archlinux.org/$pkg.git" \
-                    "$mirror" 2>/tmp/clone.log; then
-              echo "$pkg: AUR clone failed; trying GitHub mirror"
-              if ! git clone -q --bare --single-branch --branch "$pkg" \
-                      "https://github.com/archlinux/aur.git" "$mirror" 2>/tmp/clone.log; then
-                echo "::warning::Clone failed for $pkg"
+            AUR_SOURCE="https://aur.archlinux.org/$pkg.git"
+            GITHUB_MIRROR="https://github.com/archlinux/aur.git"
+            source="$AUR_SOURCE"
+            if ! source_head=$(git ls-remote "$source" HEAD 2>/tmp/clone.log | awk 'NR == 1 { print $1 }'); then
+              echo "$pkg: AUR lookup failed; checking GitHub mirror"
+              source="$GITHUB_MIRROR"
+              if ! source_head=$(git ls-remote "$source" "refs/heads/$pkg" 2>/tmp/clone.log | awk 'NR == 1 { print $1 }'); then
+                echo "::warning::Could not resolve $pkg from AUR or GitHub mirror"
                 cat /tmp/clone.log
                 FAILED+=("$pkg")
                 continue
               fi
             fi
 
-            echo "Syncing files for $pkg from package mirror"
-            mkdir -p "$pkg"
-            find "$pkg" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-            git -C "$mirror" archive --format=tar HEAD | tar -x -C "$pkg"
-            SYNCED+=("$pkg")
+            target_head=$(git ls-remote "$TARGET" "refs/heads/$pkg" 2>/tmp/target-ls-remote.log | awk 'NR == 1 { print $1 }') || target_head=""
+            if [[ -n "$source_head" && "$source_head" == "$target_head" ]]; then
+              echo "$pkg is up to date."
+              UNCHANGED+=("$pkg")
+              continue
+            fi
+
+            mirror="/tmp/aur-clone/$pkg.git"
+            rm -rf "$mirror"
+
+            echo "Cloning $pkg from ${source#https://}..."
+            if [[ "$source" == "$AUR_SOURCE" ]]; then
+              if ! git clone -q --mirror "$source" "$mirror" 2>/tmp/clone.log; then
+                echo "$pkg: AUR clone failed; trying GitHub mirror"
+                source="$GITHUB_MIRROR"
+                if ! git clone -q --bare --single-branch --branch "$pkg" "$source" "$mirror" 2>/tmp/clone.log; then
+                  echo "::warning::Clone failed for $pkg"
+                  cat /tmp/clone.log
+                  FAILED+=("$pkg")
+                  continue
+                fi
+              fi
+            elif ! git clone -q --bare --single-branch --branch "$pkg" "$source" "$mirror" 2>/tmp/clone.log; then
+              echo "::warning::Clone failed for $pkg"
+              cat /tmp/clone.log
+              FAILED+=("$pkg")
+              continue
+            fi
 
             git -C "$mirror" push "$TARGET" "HEAD:refs/heads/$pkg" --force
             git -C "$mirror" push "$TARGET" --tags --force || true
+            CHANGED=true
+            SYNCED+=("$pkg")
             echo "Updated package branch $pkg"
           done < packages.txt
 
@@ -99,43 +107,32 @@ jobs:
             sed 's/#.*//' packages.txt | awk '{print $1}' | sed 's/^local://' | grep -v '^$'
           )
           while read -r ref; do
-            case "$ref" in
-              main|aur-sync) continue ;;
-            esac
+            [[ "$ref" == "main" ]] && continue
             if ! printf '%s\n' "${KEEP[@]}" | grep -q -x "$ref"; then
-              git push origin --delete "$ref" || true
-              echo "Pruned obsolete package branch $ref"
+              if git push "$TARGET" --delete "$ref"; then
+                REMOVED+=("$ref")
+                CHANGED=true
+                echo "Pruned obsolete package branch $ref"
+              else
+                echo "::warning::Failed to prune obsolete package branch $ref"
+              fi
             fi
-          done < <(git ls-remote --heads origin | awk '{print $2}' | sed 's#refs/heads/##')
+          done < <(git ls-remote --heads "$TARGET" | awk '{print $2}' | sed 's#refs/heads/##')
 
-          echo "synced=${SYNCED[*]}" >> "$GITHUB_OUTPUT"
-          echo "failed=${FAILED[*]}" >> "$GITHUB_OUTPUT"
-          echo "removed=${REMOVED[*]}" >> "$GITHUB_OUTPUT"
+          if [[ "$CHANGED" == "true" ]]; then
+            if gh workflow run build-release.yml --repo "$GITHUB_REPOSITORY" --ref main; then
+              echo "Dispatched build workflow from changed package branches."
+            else
+              echo "::warning::Failed to dispatch build workflow."
+            fi
+          else
+            echo "No package branches changed; skipping build workflow."
+          fi
 
-          echo "### Sync summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Synced: ${SYNCED[*]:-none}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Failed: ${FAILED[*]:-none}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Removed: ${REMOVED[*]:-none}" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Create or update aggregated pull request
-        uses: peter-evans/create-pull-request@v8
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: 'chore(aur-sync): sync package sources and prune deletions'
-          branch: aur-sync
-          delete-branch: true
-          title: 'AUR sync: cập nhật và dọn dẹp source packages'
-          labels: aur-sync
-          body: |
-            ### 🔄 AUR Synchronization Report
-
-            Hệ thống tự động đã thực hiện kiểm tra và đồng bộ hóa các gói từ AUR.
-
-            | Trạng thái | Gói phần mềm |
-            | :--- | :--- |
-            | 🟢 **Synced Successfully** | `${{ steps.sync.outputs.synced || 'none' }}` |
-            | 🔴 **Failed to Sync** | `${{ steps.sync.outputs.failed || 'none' }}` |
-            | 🧹 **Pruned / Removed** | `${{ steps.sync.outputs.removed || 'none' }}` |
-
-            ---
-            *Vui lòng kiểm tra trạng thái verify build bên dưới trước khi thực hiện merge.*
+          {
+            echo "### Sync summary"
+            echo "- Synced: ${SYNCED[*]:-none}"
+            echo "- Unchanged: ${UNCHANGED[*]:-none}"
+            echo "- Failed: ${FAILED[*]:-none}"
+            echo "- Pruned: ${REMOVED[*]:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"

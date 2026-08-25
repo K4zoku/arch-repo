@@ -3,14 +3,6 @@ name: Build and Publish Arch Repository
 on:
   schedule:
     - cron: '0 19 * * *'
-  push:
-    branches: [main]
-    paths-ignore:
-      - '.github/**'
-      - 'README.md'
-      - 'packages.txt'
-      - 'k4zoku.asc'
-      - 'LICENSE'
   workflow_dispatch: {}
 
 permissions:
@@ -33,25 +25,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          ref: main
           fetch-depth: 1
 
-      - name: Scan directories and generate matrix
+      - name: Read package branches
         id: set-matrix
         run: |
           set -euo pipefail
-          pkgs=()
-          for dir in */ ; do
-            dir="${dir%/}"
-            case "$dir" in
-              .github|cache|output) continue ;;
-            esac
-            if [[ -f "$dir/PKGBUILD" ]]; then
-              pkgs+=("$dir")
-            fi
-          done
+          mapfile -t pkgs < <(
+            sed 's/#.*//' packages.txt \
+              | awk '{print $1}' \
+              | sed '/^local:/d' \
+              | grep -v '^$'
+          )
 
           MATRIX_JSON=$(printf '%s\n' "${pkgs[@]}" | jq -R . | jq -s -c .)
-          echo "Found packages: $MATRIX_JSON"
+          echo "Found package branches: $MATRIX_JSON"
           echo "matrix=$MATRIX_JSON" >> "$GITHUB_OUTPUT"
 
   build:
@@ -116,11 +105,12 @@ jobs:
           fi
           pacman -Sy
 
-      - name: Checkout repository
+      - name: Checkout package branch
         uses: actions/checkout@v7
         with:
+          ref: ${{ matrix.package }}
+          path: ${{ matrix.package }}
           fetch-depth: 1
-
       - name: Fix workspace ownership for build user
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
 
