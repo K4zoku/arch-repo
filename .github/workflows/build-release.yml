@@ -87,6 +87,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/k4zoku.asc" \
+            -o /tmp/k4zoku.asc
+          pacman-key --init
+          pacman-key --add /tmp/k4zoku.asc
+          pacman-key --lsign-key 787C5932BF4CDF5C36E071B9798FBBB05FCDD531
           tmp=$(mktemp)
           awk '
             BEGIN { inserted=0 }
