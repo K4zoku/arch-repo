@@ -60,6 +60,7 @@ sudo pacman -S <package-name>
 | [webhid-addon-git](https://github.com/K4zoku/FF-WebHID) | WebHID browser extension for Firefox and Zen (git build, unsigned) (`any`) |
 | [tosu-overlay](https://github.com/K4zoku/tosu-overlay-qt) | Overlay for osu! powered by tosu (`x86_64`) |
 | [tosu-overlay-git](https://github.com/K4zoku/tosu-overlay-qt) | Overlay for osu! powered by tosu (git build) (`x86_64`) |
+| [tosu-git](https://github.com/tosuapp/tosu) | Memory reader and PP counters provider for osu! and osu! Lazer (git build) (`x86_64`) |
 | [dearsql](https://github.com/dunkbing/dearsql) | Cross-platform SQL database client (`x86_64`) |
 | [dearsql-git](https://github.com/dunkbing/dearsql) | Cross-platform SQL database client (git build) (`x86_64`) |
 
