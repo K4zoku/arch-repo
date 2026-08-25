@@ -139,11 +139,9 @@ jobs:
           skipped_json=$(array_json "${skipped[@]}")
           removed_json=$(array_json "${removed[@]}")
           if ((${#changed[@]} > 0)); then
-            build_matrix_json=$(printf '%s\n' "${changed[@]}" \
-              | jq -R -c '{package: ., build: true}' \
-              | jq -s -c '{include: .}')
+            build_matrix_json="$changed_json"
           else
-            build_matrix_json='{"include":[{"package":"__no_build__","build":false}]}'
+            build_matrix_json='["__no_build__"]'
           fi
 
           has_builds=false
@@ -168,10 +166,11 @@ jobs:
       image: cachyos/cachyos
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+      matrix:
+        package: ${{ fromJson(needs.prepare.outputs.matrix) }}
     steps:
       - name: Install base dependencies
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         run: |
           set -euo pipefail
           pacman -Syu --noconfirm --needed git subversion mercurial sudo rsync github-cli fakeroot binutils pacman-contrib paru curl awk tar jq gnupg
@@ -179,7 +178,7 @@ jobs:
           grep -q '^builder ALL=(ALL) NOPASSWD: ALL$' /etc/sudoers || echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
       - name: Configure makepkg for generic x86-64 optimization
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         run: |
           set -euo pipefail
           echo "Downloading CachyOS generic makepkg.conf..."
@@ -192,7 +191,7 @@ jobs:
           sed -i 's/^PACKAGECARCH=/#PACKAGECARCH=/g' /etc/makepkg.conf
 
       - name: Configure pacman options and custom repository
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -226,7 +225,7 @@ jobs:
           pacman -Sy
 
       - name: Checkout package branch
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         id: package
         uses: actions/checkout@v7
         with:
@@ -235,7 +234,7 @@ jobs:
           fetch-depth: 1
 
       - name: Restore package build directories
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         id: package-build-cache
         uses: actions/cache/restore@v4
         with:
@@ -246,11 +245,11 @@ jobs:
           restore-keys: |
             arch-package-build-v1-${{ matrix.package }}-
       - name: Fix workspace ownership for build user
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
 
       - name: Import signing key
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
@@ -262,7 +261,7 @@ jobs:
           fi
 
       - name: Build and Fallback Logic
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         id: build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -351,7 +350,7 @@ jobs:
           fi
 
       - name: Save package build directories
-        if: always() && matrix.build && steps.package-build-cache.outputs.cache-hit != 'true'
+        if: always() && matrix.package != '__no_build__' && steps.package-build-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -360,11 +359,11 @@ jobs:
           key: arch-package-build-v1-${{ matrix.package }}-${{ steps.package.outputs.commit }}
 
       - name: Clean package build directories
-        if: always() && matrix.build
+        if: always() && matrix.package != '__no_build__'
         run: sudo -u builder rm -rf "$GITHUB_WORKSPACE/${{ matrix.package }}/src" "$GITHUB_WORKSPACE/${{ matrix.package }}/pkg"
 
       - name: Upload package files
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         uses: actions/upload-artifact@v7
         with:
           path: output/*.pkg.tar.zst
@@ -373,7 +372,7 @@ jobs:
           retention-days: 1
 
       - name: Upload package signatures
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         uses: actions/upload-artifact@v7
         with:
           path: output/*.pkg.tar.zst.sig
@@ -382,7 +381,7 @@ jobs:
           retention-days: 1
 
       - name: Upload build status
-        if: matrix.build
+        if: matrix.package != '__no_build__'
         uses: actions/upload-artifact@v7
         with:
           path: output/status-*.txt
