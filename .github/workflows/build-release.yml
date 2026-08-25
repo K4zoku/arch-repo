@@ -23,6 +23,7 @@ jobs:
       image: cachyos/cachyos
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      changed: ${{ steps.set-matrix.outputs.changed }}
       has_builds: ${{ steps.set-matrix.outputs.has_builds }}
       has_changes: ${{ steps.set-matrix.outputs.has_changes }}
       skipped: ${{ steps.set-matrix.outputs.skipped }}
@@ -134,35 +135,43 @@ jobs:
               printf '%s\n' "$@" | jq -R . | jq -s -c .
             fi
           }
-
-          matrix_json=$(array_json "${changed[@]}")
+          changed_json=$(array_json "${changed[@]}")
           skipped_json=$(array_json "${skipped[@]}")
           removed_json=$(array_json "${removed[@]}")
+          if ((${#changed[@]} > 0)); then
+            build_matrix_json=$(printf '%s\n' "${changed[@]}" \
+              | jq -R -c '{package: ., build: true}' \
+              | jq -s -c '{include: .}')
+          else
+            build_matrix_json='{"include":[{"package":"__no_build__","build":false}]}'
+          fi
+
           has_builds=false
           has_changes=false
           ((${#changed[@]} > 0)) && has_builds=true
           ((${#changed[@]} > 0 || ${#removed[@]} > 0)) && has_changes=true
 
-          echo "Changed packages: $matrix_json"
+          echo "Changed packages: $changed_json"
+          echo "Build matrix: $build_matrix_json"
           echo "Skipped packages: $skipped_json"
           echo "Removed packages: $removed_json"
-          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
+          echo "matrix=$build_matrix_json" >> "$GITHUB_OUTPUT"
+          echo "changed=$changed_json" >> "$GITHUB_OUTPUT"
           echo "has_builds=$has_builds" >> "$GITHUB_OUTPUT"
           echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
           echo "skipped=$skipped_json" >> "$GITHUB_OUTPUT"
           echo "removed=$removed_json" >> "$GITHUB_OUTPUT"
 
   build:
-    if: ${{ needs.prepare.outputs.matrix != '[]' }}
     runs-on: ubuntu-latest
     container:
       image: cachyos/cachyos
     strategy:
       fail-fast: false
-      matrix:
-        package: ${{ fromJson(needs.prepare.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     steps:
       - name: Install base dependencies
+        if: matrix.build
         run: |
           set -euo pipefail
           pacman -Syu --noconfirm --needed git subversion mercurial sudo rsync github-cli fakeroot binutils pacman-contrib paru curl awk tar jq gnupg
@@ -170,6 +179,7 @@ jobs:
           grep -q '^builder ALL=(ALL) NOPASSWD: ALL$' /etc/sudoers || echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
       - name: Configure makepkg for generic x86-64 optimization
+        if: matrix.build
         run: |
           set -euo pipefail
           echo "Downloading CachyOS generic makepkg.conf..."
@@ -182,6 +192,7 @@ jobs:
           sed -i 's/^PACKAGECARCH=/#PACKAGECARCH=/g' /etc/makepkg.conf
 
       - name: Configure pacman options and custom repository
+        if: matrix.build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -215,6 +226,7 @@ jobs:
           pacman -Sy
 
       - name: Checkout package branch
+        if: matrix.build
         id: package
         uses: actions/checkout@v7
         with:
@@ -223,6 +235,7 @@ jobs:
           fetch-depth: 1
 
       - name: Restore package build directories
+        if: matrix.build
         id: package-build-cache
         uses: actions/cache/restore@v4
         with:
@@ -233,9 +246,11 @@ jobs:
           restore-keys: |
             arch-package-build-v1-${{ matrix.package }}-
       - name: Fix workspace ownership for build user
+        if: matrix.build
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
 
       - name: Import signing key
+        if: matrix.build
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
@@ -247,6 +262,7 @@ jobs:
           fi
 
       - name: Build and Fallback Logic
+        if: matrix.build
         id: build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -335,7 +351,7 @@ jobs:
           fi
 
       - name: Save package build directories
-        if: always() && steps.package-build-cache.outputs.cache-hit != 'true'
+        if: always() && matrix.build && steps.package-build-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -344,10 +360,11 @@ jobs:
           key: arch-package-build-v1-${{ matrix.package }}-${{ steps.package.outputs.commit }}
 
       - name: Clean package build directories
-        if: always()
+        if: always() && matrix.build
         run: sudo -u builder rm -rf "$GITHUB_WORKSPACE/${{ matrix.package }}/src" "$GITHUB_WORKSPACE/${{ matrix.package }}/pkg"
 
       - name: Upload package files
+        if: matrix.build
         uses: actions/upload-artifact@v7
         with:
           path: output/*.pkg.tar.zst
@@ -356,6 +373,7 @@ jobs:
           retention-days: 1
 
       - name: Upload package signatures
+        if: matrix.build
         uses: actions/upload-artifact@v7
         with:
           path: output/*.pkg.tar.zst.sig
@@ -364,6 +382,7 @@ jobs:
           retention-days: 1
 
       - name: Upload build status
+        if: matrix.build
         uses: actions/upload-artifact@v7
         with:
           path: output/status-*.txt
@@ -375,16 +394,30 @@ jobs:
     if: >-
       always() &&
       needs.prepare.result == 'success' &&
-      (needs.prepare.outputs.matrix != '[]' || needs.prepare.outputs.removed != '[]') &&
       (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/archlinux/archlinux:latest
     steps:
+
+      - name: Check for package changes
+        id: changes
+        env:
+          CHANGED_PACKAGES: ${{ needs.prepare.outputs.changed }}
+          REMOVED_PACKAGES: ${{ needs.prepare.outputs.removed }}
+        run: |
+          if [ "$CHANGED_PACKAGES" = "[]" ] \
+              && [ "$REMOVED_PACKAGES" = "[]" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install dependencies
+        if: steps.changes.outputs.has_changes == 'true'
         run: pacman -Syu --noconfirm --needed github-cli pacman-contrib jq gnupg
 
       - name: Import signing key
+        if: steps.changes.outputs.has_changes == 'true'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
@@ -396,9 +429,10 @@ jobs:
           fi
 
       - name: Restore unchanged package artifacts
+        if: steps.changes.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          CHANGED_PACKAGES: ${{ needs.prepare.outputs.matrix }}
+          CHANGED_PACKAGES: ${{ needs.prepare.outputs.changed }}
           REMOVED_PACKAGES: ${{ needs.prepare.outputs.removed }}
         run: |
           set -euo pipefail
@@ -425,7 +459,7 @@ jobs:
 
 
       - name: Download all artifacts
-        if: needs.build.result == 'success'
+        if: steps.changes.outputs.has_changes == 'true' && needs.build.result == 'success'
         uses: actions/download-artifact@v8
         with:
           path: output
@@ -433,6 +467,7 @@ jobs:
 
       - name: Generate fresh pacman database & Prepare Release Notes
         id: generate
+        if: steps.changes.outputs.has_changes == 'true'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPGKEY: 787C5932BF4CDF5C36E071B9798FBBB05FCDD531
@@ -497,7 +532,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Publish to GitHub Release
-        if: steps.generate.outputs.has_packages == 'true' && steps.generate.outputs.has_new_changes == 'true'
+        if: steps.changes.outputs.has_changes == 'true' && steps.generate.outputs.has_packages == 'true' && steps.generate.outputs.has_new_changes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
