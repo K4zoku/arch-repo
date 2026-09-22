@@ -51,7 +51,7 @@ jobs:
           mapfile -t pkgs < <(
             sed 's/#.*//' packages.txt \
               | awk '{print $1}' \
-              | sed '/^local:/d' \
+              | sed 's/^local://' \
               | grep -v '^$'
           )
 
