@@ -1,0 +1,15 @@
+_hermes_kms_core_refresh_access() {
+  local rule=/etc/udev/rules.d/90-hermes-kms-user.rules
+
+  if [ -f "$rule" ] &&
+     grep -qx '# Managed by hermes-kms-setup. Grants one configured UID render-node access.' "$rule"; then
+    rm -f -- "$rule"
+  fi
+  if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || true
+    udevadm trigger --subsystem-match=drm --action=change || true
+  fi
+}
+
+post_install() { _hermes_kms_core_refresh_access; }
+post_upgrade() { _hermes_kms_core_refresh_access; }

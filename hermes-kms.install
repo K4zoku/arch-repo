@@ -1,0 +1,29 @@
+_hermes_kms_stale_override() {
+  local conf=/etc/modprobe.d/hermes-kms.conf
+
+  [ -f "$conf" ] || return 0
+  grep -Eq '^[[:space:]]*options[[:space:]]+hermes_kms\b.*\binitial_enabled=1\b' "$conf" || return 0
+
+  cat >&2 <<-MSG
+==> WARNING: $conf sets initial_enabled=1.
+    Remove it or set initial_enabled=0 before testing Hermes-KMS.
+MSG
+}
+
+_runtime_reload() {
+  command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
+  if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || true
+    udevadm trigger --subsystem-match=drm --action=change || true
+  fi
+}
+
+post_install() {
+  _hermes_kms_stale_override
+  _runtime_reload
+}
+
+post_upgrade() {
+  _hermes_kms_stale_override
+  _runtime_reload
+}
