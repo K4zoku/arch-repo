@@ -363,22 +363,98 @@ jobs:
         if: always() && matrix.package != '__no_build__'
         run: sudo -u builder rm -rf "$GITHUB_WORKSPACE/${{ matrix.package }}/src" "$GITHUB_WORKSPACE/${{ matrix.package }}/pkg"
 
-      - name: Upload package files
+      - name: Enumerate direct package artifacts
         if: matrix.package != '__no_build__'
+        id: direct_artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(output/*.pkg.tar.zst)
+
+          if (( ${#packages[@]} > 4 )); then
+            echo "::error::A pkgbase produced ${#packages[@]} packages; direct artifact upload currently supports up to 4."
+            exit 1
+          fi
+
+          for i in "${!packages[@]}"; do
+            pkg="${packages[$i]}"
+            echo "pkg_${i}=$pkg" >> "$GITHUB_OUTPUT"
+            if [[ -f "${pkg}.sig" ]]; then
+              echo "sig_${i}=${pkg}.sig" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      - name: Upload package file 1
+        if: matrix.package != '__no_build__' && steps.direct_artifacts.outputs.pkg_0 != ''
         uses: actions/upload-artifact@v7
         with:
-          path: output/*.pkg.tar.zst
+          path: ${{ steps.direct_artifacts.outputs.pkg_0 }}
           archive: false
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 1
 
-      - name: Upload package signatures
-        if: matrix.package != '__no_build__'
+      - name: Upload package signature 1
+        if: matrix.package != '__no_build__' && steps.direct_artifacts.outputs.sig_0 != ''
         uses: actions/upload-artifact@v7
         with:
-          path: output/*.pkg.tar.zst.sig
+          path: ${{ steps.direct_artifacts.outputs.sig_0 }}
           archive: false
-          if-no-files-found: ignore
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload package file 2
+        if: matrix.package != '__no_build__' && steps.direct_artifacts.outputs.pkg_1 != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.direct_artifacts.outputs.pkg_1 }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload package signature 2
+        if: matrix.package != '__no_build__' && steps.direct_artifacts.outputs.sig_1 != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.direct_artifacts.outputs.sig_1 }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload package file 3
+        if: matrix.package != '__no_build__' && steps.direct_artifacts.outputs.pkg_2 != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.direct_artifacts.outputs.pkg_2 }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload package signature 3
+        if: matrix.package != '__no_build__' && steps.direct_artifacts.outputs.sig_2 != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.direct_artifacts.outputs.sig_2 }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload package file 4
+        if: matrix.package != '__no_build__' && steps.direct_artifacts.outputs.pkg_3 != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.direct_artifacts.outputs.pkg_3 }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload package signature 4
+        if: matrix.package != '__no_build__' && steps.direct_artifacts.outputs.sig_3 != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.direct_artifacts.outputs.sig_3 }}
+          archive: false
+          if-no-files-found: error
           retention-days: 1
 
       - name: Upload build status
@@ -448,11 +524,38 @@ jobs:
             --dir /tmp/previous-packages \
             --pattern '*.pkg.tar.zst.sig' 2>/dev/null || true
 
+          mkdir -p /tmp/previous-db /tmp/previous-files
+          if gh release download "$TAG" --repo "$REPO" \
+              --dir /tmp/previous-db \
+              --pattern "${REPO_DB_NAME}.files.tar.gz" 2>/dev/null; then
+            tar -xzf "/tmp/previous-db/${REPO_DB_NAME}.files.tar.gz" \
+              -C /tmp/previous-files 2>/dev/null || true
+          fi
+
           for pkg in \
               $(jq -r '.[]' <<< "$CHANGED_PACKAGES") \
               $(jq -r '.[]' <<< "$REMOVED_PACKAGES"); do
-            rm -f "/tmp/previous-packages/${pkg}-"*.pkg.tar.zst
-            rm -f "/tmp/previous-packages/${pkg}-"*.pkg.tar.zst.sig
+            matched=false
+            for desc_file in /tmp/previous-files/*/desc; do
+              [[ -f "$desc_file" ]] || continue
+              base_pkg=$(awk '/^%BASE%/{getline; print; exit}' "$desc_file")
+              pkg_name=$(awk '/^%NAME%/{getline; print; exit}' "$desc_file")
+              check_name="${base_pkg:-$pkg_name}"
+              [[ "$check_name" == "$pkg" ]] || continue
+
+              file_name=$(awk '/^%FILENAME%/{getline; print; exit}' "$desc_file")
+              [[ -n "$file_name" ]] || continue
+              rm -f "/tmp/previous-packages/$file_name" \
+                    "/tmp/previous-packages/$file_name.sig"
+              matched=true
+            done
+
+            # Compatibility fallback for repositories created before %BASE%
+            # metadata was available.
+            if [[ "$matched" == "false" ]]; then
+              rm -f "/tmp/previous-packages/${pkg}-"*.pkg.tar.zst
+              rm -f "/tmp/previous-packages/${pkg}-"*.pkg.tar.zst.sig
+            fi
           done
 
           cp -n /tmp/previous-packages/*.pkg.tar.zst output/ 2>/dev/null || true
