@@ -119,14 +119,10 @@ jobs:
             fi
           done < <(git ls-remote --heads "$TARGET" | awk '{print $2}' | sed 's#refs/heads/##')
 
-          if [[ "$CHANGED" == "true" ]]; then
-            if gh workflow run build-release.yml --repo "$GITHUB_REPOSITORY" --ref main; then
-              echo "Dispatched build workflow from changed package branches."
-            else
-              echo "::warning::Failed to dispatch build workflow."
-            fi
+          if gh workflow run build-release.yml --repo "$GITHUB_REPOSITORY" --ref main; then
+            echo "Dispatched build workflow to check package versions."
           else
-            echo "No package branches changed; skipping build workflow."
+            echo "::warning::Failed to dispatch build workflow."
           fi
 
           {

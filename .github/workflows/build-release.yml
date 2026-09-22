@@ -78,27 +78,25 @@ jobs:
 
             if grep -q 'pkgver()' "$pkg/PKGBUILD"; then
               sudo -u builder bash -lc \
-                "cd '$GITHUB_WORKSPACE/$pkg' && makepkg -od --noprepare --skipinteg" \
-                >/dev/null 2>&1 || true
+                "cd '$GITHUB_WORKSPACE/$pkg' && makepkg -od --noprepare --skipinteg"
             fi
 
             expected_pkgs=$(sudo -u builder bash -lc \
-              "cd '$GITHUB_WORKSPACE/$pkg' && makepkg --packagelist 2>/dev/null" \
-              || true)
+              "cd '$GITHUB_WORKSPACE/$pkg' && makepkg --packagelist")
+            if [[ -z "$expected_pkgs" ]]; then
+              echo "::error::$pkg: makepkg returned an empty package list"
+              exit 1
+            fi
             expected_pkgs="${expected_pkgs//:/.}"
 
             needs_build=false
-            if [[ -z "$expected_pkgs" ]]; then
-              needs_build=true
-            else
-              for pkg_path in $expected_pkgs; do
-                pkg_basename=$(basename "$pkg_path")
-                if ! grep -q -x -- "$pkg_basename" /tmp/repo-files/*/desc 2>/dev/null; then
-                  needs_build=true
-                  break
-                fi
-              done
-            fi
+            for pkg_path in $expected_pkgs; do
+              pkg_basename=$(basename "$pkg_path")
+              if ! grep -q -x -- "$pkg_basename" /tmp/repo-files/*/desc 2>/dev/null; then
+                needs_build=true
+                break
+              fi
+            done
 
             if [[ "$needs_build" == "true" ]]; then
               changed+=("$pkg")
