@@ -42,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           pacman -Syu --noconfirm --needed git sudo github-cli jq
-          id builder >/dev/null 2>&1 || useradd -m builder
+          id builder unzip >/dev/null 2>&1 || useradd -m builder
           grep -q '^builder ALL=(ALL) NOPASSWD: ALL$' /etc/sudoers \
             || echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
