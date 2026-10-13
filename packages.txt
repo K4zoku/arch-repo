@@ -9,5 +9,9 @@ tosu-overlay-git
 tosu-git
 dearsql
 dearsql-git
+vosu
+vosu-git
+vosulay
+vosulay-git
 local:hermes-streaming
 local:hermes-kms-git
